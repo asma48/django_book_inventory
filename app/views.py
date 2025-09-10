@@ -1,19 +1,89 @@
 import io
 from django.views import View
+from rest_framework import viewsets
+from rest_framework.views import APIView
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
 from .models import Book, User
-from .serializers import BookSerializer, UserSerializer
+from .serializers import BookSerializer, UserSerializer, UserSerial
 from rest_framework.renderers import JSONRenderer
 from rest_framework.parsers import JSONParser
 from django.http import HttpResponse, JsonResponse
 from django.contrib.auth.hashers import make_password, check_password
-from rest_framework.authtoken.models import Token
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+from rest_framework.generics import ListAPIView
+from rest_framework.permissions import AllowAny
+from app.mypagination import MyPagination
 
 
 
 # Create your views here.
+
+def hash_password(password):
+    return make_password(password)
+def verify_password(password, hashpassword):
+    return check_password(password, hashpassword)
+
+def get_tokens_for_user(user):
+    refresh = RefreshToken.for_user(user)
+    return {
+        'refresh': str(refresh),
+        'access': str(refresh.access_token),
+    }
+
+
+class UserView(View):
+
+    @csrf_exempt
+    def user_create(self, request):
+        if request.method == 'POST':
+            data = request.body
+            stream = io.BytesIO(data)
+            python_user_obj = JSONParser().parse(stream)
+
+            #if 'password' in python_user_obj:
+                #python_user_obj['password'] = hash_password(python_user_obj['password'])
+    
+
+            user_data = UserSerializer(data=python_user_obj)
+
+            if user_data.is_valid():
+                user_data.save()
+                return JsonResponse({'msg': 'User created'})
+            
+            return JsonResponse(user_data.errors)    
+
+    @csrf_exempt
+    def log_in(self, request):
+        if request.method == 'POST':  
+            data = request.body
+            stream = io.BytesIO(data)
+            python_user_obj = JSONParser().parse(stream)   
+
+            email = python_user_obj.get("email")
+            password = python_user_obj.get("password")
+
+            if not email or not password:
+                return JsonResponse({"error": "Email and password required"}, status=400)
+
+            try:
+                db_user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                return JsonResponse({"error": "Invalid email or password"}, status=400)
+            
+
+            if verify_password(password, db_user.password):
+                refresh = RefreshToken.for_user(db_user)
+                return JsonResponse({
+                    "msg": "User login successful",
+                    "user_email": db_user.email,
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
+                })
+            else:
+                return JsonResponse({"error": "Invalid email or password"}, status=400)
+            
+
 
 
 class BookView(View):
@@ -91,60 +161,23 @@ class BookView(View):
     
 
 
-
-
-def hash_password(password):
-    return make_password(password)
-def verify_password(password, hashpassword):
-    return check_password(password, hashpassword)
-
-
-
-class UserView(View):
-
-    @csrf_exempt
-    def user_create(self, request):
-        if request.method == 'POST':
-            data = request.body
-            stream = io.BytesIO(data)
-            python_user_obj = JSONParser().parse(stream)
-
-            if 'password' in python_user_obj:
-                python_user_obj['password'] = hash_password(python_user_obj['password'])
+class BookList(ListAPIView):
+    permission_classes = [AllowAny]
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
+    pagination_class = MyPagination
     
 
-            user_data = UserSerializer(data=python_user_obj)
 
-            if user_data.is_valid():
-                user_data.save()
-                return JsonResponse({'msg': 'User created'})
-            
-            return JsonResponse(user_data.errors)    
 
-    @csrf_exempt
-    def log_in(self, request):
-        if request.method == 'POST':  
-            data = request.body
-            stream = io.BytesIO(data)
-            python_user_obj = JSONParser().parse(stream)   
 
-            email = python_user_obj.get("email")
-            password = python_user_obj.get("password")
+class Books(viewsets.ModelViewSet):
+    permission_classes = [AllowAny] 
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
 
-            if not email or not password:
-                return JsonResponse({"error": "Email and password required"}, status=400)
 
-            try:
-                db_user = User.objects.get(email=email)
-            except User.DoesNotExist:
-                return JsonResponse({"error": "Invalid email or password"}, status=400)
-
-            if verify_password(password, db_user.password):
-                token, _ = Token.objects.get_or_create(user= db_user)
-                return JsonResponse({
-                    "msg": "User login successful",
-                    "user_email": db_user.email,
-                    "token": token.key
-                })
-            else:
-                return JsonResponse({"error": "Invalid email or password"}, status=400)
+class Users(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
